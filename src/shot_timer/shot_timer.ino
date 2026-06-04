@@ -16,6 +16,7 @@
  */
 
 #include <Arduino.h>
+#include <Adafruit_TinyUSB.h>
 
 // ── Pin ──────────────────────────────────────────────────────────────
 #define SWITCH_PIN  1          // D1 / P0.03
@@ -41,6 +42,7 @@ uint32_t idleStartMs     = 0;    // millis() when we entered idle (stopped/pause
 bool     lastSwitchPhysical = HIGH;  // raw pin state last loop
 bool     switchPressed      = false; // debounced, one-shot press event
 bool     switchHeld         = false; // true once hold threshold passed
+bool     buttonDown         = false; // true after confirmed press, false after confirmed release
 uint32_t pressStartMs       = 0;     // when the current press began
 
 // ─────────────────────────────────────────────────────────────────────
@@ -65,7 +67,12 @@ void goToDeepSleep(const char* reason) {
       g_ADigitalPinMap[SWITCH_PIN],
       NRF_GPIO_PIN_PULLUP,
       NRF_GPIO_PIN_SENSE_LOW);
-  sd_power_system_off();   // does not return; chip resets on wake
+  sd_power_system_off();        // succeeds if SoftDevice is running
+  NRF_POWER->SYSTEMOFF = 1;    // fallback: direct register, no SoftDevice needed
+  // If we reach here, both sleep attempts failed — log and halt
+  Serial.println("[SLEEP] ERROR: sleep failed, halted");
+  Serial.flush();
+  while (true) {}
 #else
   // Fallback for simulation / other targets: busy-wait
   while (true) { delay(1000); }
@@ -126,6 +133,7 @@ void loop() {
       // Confirmed press
       pressStartMs   = millis();
       switchHeld     = false;
+      buttonDown     = true;
     }
   }
 
@@ -133,6 +141,7 @@ void loop() {
     // Rising edge — button released
     delay(DEBOUNCE_MS);
     if (digitalRead(SWITCH_PIN) == HIGH) {
+      buttonDown = false;
       if (!switchHeld) {
         // Short press: not a hold-reset, fire the press event
         switchPressed = true;
@@ -142,7 +151,7 @@ void loop() {
   }
 
   // Detect hold threshold while button is still down
-  if (raw == LOW && !switchHeld) {
+  if (buttonDown && !switchHeld) {
     if ((millis() - pressStartMs) >= HOLD_RESET_MS) {
       switchHeld = true;
       // ── Hold action: reset ──
@@ -159,19 +168,18 @@ void loop() {
 
     switch (timerState) {
       case STOPPED:
-      case PAUSED:
-        // Start / resume
+      case PAUSED: {
+        bool wasPaused = (timerState == PAUSED);
         timerState  = RUNNING;
         runStartMs  = millis();
         lastLogMs   = millis();
-        Serial.println(timerState == RUNNING
-                       ? "[START] Timer running"
-                       : "[RESUME] Timer resumed");
+        Serial.println(wasPaused ? "[RESUME] Timer resumed" : "[START] Timer running");
         // Print immediately so the state change is visible
         Serial.print("[TIME] ");
         Serial.print(currentSeconds());
         Serial.println(" s");
         break;
+      }
 
       case RUNNING:
         // Pause — freeze elapsed seconds
