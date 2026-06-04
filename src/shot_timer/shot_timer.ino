@@ -17,9 +17,19 @@
 
 #include <Arduino.h>
 #include <Adafruit_TinyUSB.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ── Pin ──────────────────────────────────────────────────────────────
-#define SWITCH_PIN  1          // D1 / P0.03
+#define SWITCH_PIN    1        // D1 / P0.03
+
+// ── OLED ─────────────────────────────────────────────────────────────
+#define OLED_WIDTH   128
+#define OLED_HEIGHT   64
+#define OLED_RESET    -1
+#define OLED_ADDRESS  0x3C
+
+Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 
 // ── Timing constants ─────────────────────────────────────────────────
 #define DEBOUNCE_MS         20
@@ -38,6 +48,9 @@ uint32_t runStartMs      = 0;    // millis() when last run segment started
 uint32_t lastLogMs       = 0;    // millis() of last 1-second log
 uint32_t idleStartMs     = 0;    // millis() when we entered idle (stopped/paused)
 
+// ── Forward declarations ──────────────────────────────────────────────
+void updateDisplay(const char* label = nullptr);
+
 // ── Switch state ──────────────────────────────────────────────────────
 bool     lastSwitchPhysical = HIGH;  // raw pin state last loop
 bool     switchPressed      = false; // debounced, one-shot press event
@@ -52,7 +65,10 @@ void goToDeepSleep(const char* reason) {
   Serial.print("[SLEEP] Reason: ");
   Serial.println(reason);
   Serial.flush();
-  delay(10);
+
+  updateDisplay("SLEEP");
+  delay(500);
+  oled.ssd1306_command(SSD1306_DISPLAYOFF);
 
   // Configure the switch pin as a wake source (active-low)
   pinMode(SWITCH_PIN, INPUT_PULLUP);
@@ -88,6 +104,7 @@ void resetTimer() {
   lastLogMs      = millis();
   idleStartMs    = millis();
   Serial.println("[RESET] Timer reset to 0");
+  updateDisplay();
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -101,6 +118,36 @@ uint32_t currentSeconds() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Render current state to the OLED
+//   label: if non-null, overrides the state name (e.g. "SLEEP")
+// ─────────────────────────────────────────────────────────────────────
+void updateDisplay(const char* label) {
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
+
+  // Top row: state label
+  oled.setTextSize(1);
+  oled.setCursor(0, 0);
+  if (label) {
+    oled.print(label);
+  } else {
+    switch (timerState) {
+      case STOPPED: oled.print("STOPPED"); break;
+      case RUNNING: oled.print("RUNNING"); break;
+      case PAUSED:  oled.print("PAUSED");  break;
+    }
+  }
+
+  // Large seconds (textSize 4 → 24×32 px per char, fits 128 px wide)
+  oled.setTextSize(4);
+  oled.setCursor(0, 20);
+  oled.print(currentSeconds());
+  oled.print("s");
+
+  oled.display();
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Setup
 // ─────────────────────────────────────────────────────────────────────
 void setup() {
@@ -109,12 +156,19 @@ void setup() {
 
   pinMode(SWITCH_PIN, INPUT_PULLUP);
 
+  if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("[OLED] Init failed");
+  } else {
+    Serial.println("[OLED] Ready");
+  }
+
   Serial.println("=== Switch Timer Ready ===");
   Serial.println("  Short press → start / pause");
   Serial.println("  Hold 2 s   → reset");
   Serial.println("  Limit: 99 s or 60 s idle → deep sleep");
 
   idleStartMs = millis();
+  updateDisplay();
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -174,10 +228,10 @@ void loop() {
         runStartMs  = millis();
         lastLogMs   = millis();
         Serial.println(wasPaused ? "[RESUME] Timer resumed" : "[START] Timer running");
-        // Print immediately so the state change is visible
         Serial.print("[TIME] ");
         Serial.print(currentSeconds());
         Serial.println(" s");
+        updateDisplay();
         break;
       }
 
@@ -189,6 +243,7 @@ void loop() {
         Serial.print("[PAUSE] Paused at ");
         Serial.print(elapsedSeconds);
         Serial.println(" s");
+        updateDisplay();
         break;
     }
   }
@@ -202,6 +257,7 @@ void loop() {
       Serial.print("[TIME] ");
       Serial.print(secs);
       Serial.println(" s");
+      updateDisplay();
 
       // Check 99-second ceiling
       if (secs >= MAX_SECONDS) {
