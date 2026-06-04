@@ -49,7 +49,7 @@ uint32_t lastLogMs       = 0;    // millis() of last 1-second log
 uint32_t idleStartMs     = 0;    // millis() when we entered idle (stopped/paused)
 
 // ── Forward declarations ──────────────────────────────────────────────
-void updateDisplay(const char* label = nullptr);
+void updateDisplay();
 
 // ── Switch state ──────────────────────────────────────────────────────
 bool     lastSwitchPhysical = HIGH;  // raw pin state last loop
@@ -66,8 +66,6 @@ void goToDeepSleep(const char* reason) {
   Serial.println(reason);
   Serial.flush();
 
-  updateDisplay("SLEEP");
-  delay(500);
   oled.ssd1306_command(SSD1306_DISPLAYOFF);
 
   // Configure the switch pin as a wake source (active-low)
@@ -118,31 +116,62 @@ uint32_t currentSeconds() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Render current state to the OLED
-//   label: if non-null, overrides the state name (e.g. "SLEEP")
+// 3×5 dot-matrix font
+// Each row byte: bit 2 = left col, bit 1 = mid col, bit 0 = right col
 // ─────────────────────────────────────────────────────────────────────
-void updateDisplay(const char* label) {
-  oled.clearDisplay();
-  oled.setTextColor(SSD1306_WHITE);
+#define DOT_PITCH   12   // dot center-to-center (px)
+#define DOT_RADIUS   4   // dot radius (px)
+#define CHAR_GAP     8   // gap between characters (px)
 
-  // Top row: state label
-  oled.setTextSize(1);
-  oled.setCursor(0, 0);
-  if (label) {
-    oled.print(label);
-  } else {
-    switch (timerState) {
-      case STOPPED: oled.print("STOPPED"); break;
-      case RUNNING: oled.print("RUNNING"); break;
-      case PAUSED:  oled.print("PAUSED");  break;
+static const uint8_t DOT_GLYPHS[10][5] = {
+  {0b111, 0b101, 0b101, 0b101, 0b111},  // 0
+  {0b010, 0b110, 0b010, 0b010, 0b111},  // 1
+  {0b111, 0b001, 0b111, 0b100, 0b111},  // 2
+  {0b111, 0b001, 0b111, 0b001, 0b111},  // 3
+  {0b101, 0b101, 0b111, 0b001, 0b001},  // 4
+  {0b111, 0b100, 0b111, 0b001, 0b111},  // 5
+  {0b111, 0b100, 0b111, 0b101, 0b111},  // 6
+  {0b111, 0b001, 0b001, 0b001, 0b001},  // 7
+  {0b111, 0b101, 0b111, 0b101, 0b111},  // 8
+  {0b111, 0b101, 0b111, 0b001, 0b111},  // 9
+};
+
+// x0/y0 = center of top-left dot of the character
+void drawDotChar(int16_t x0, int16_t y0, uint8_t digit) {
+  for (uint8_t row = 0; row < 5; row++) {
+    uint8_t bits = DOT_GLYPHS[digit][row];
+    for (uint8_t col = 0; col < 3; col++) {
+      if (bits & (4 >> col)) {
+        oled.fillCircle(x0 + col * DOT_PITCH, y0 + row * DOT_PITCH,
+                        DOT_RADIUS, SSD1306_WHITE);
+      }
     }
   }
+}
 
-  // Large seconds (textSize 4 → 24×32 px per char, fits 128 px wide)
-  oled.setTextSize(4);
-  oled.setCursor(0, 20);
-  oled.print(currentSeconds());
-  oled.print("s");
+// ─────────────────────────────────────────────────────────────────────
+// Render seconds as dot-matrix digits centered on the OLED
+// ─────────────────────────────────────────────────────────────────────
+void updateDisplay() {
+  oled.clearDisplay();
+
+  uint32_t secs = currentSeconds();
+  uint8_t  len  = (secs >= 10) ? 2 : 1;
+
+  // Pixel dimensions of one character bounding box
+  const int16_t charW = 2 * DOT_PITCH + 2 * DOT_RADIUS;  // 32 px
+  const int16_t charH = 4 * DOT_PITCH + 2 * DOT_RADIUS;  // 56 px
+
+  int16_t totalW = len * charW + (len - 1) * CHAR_GAP;
+  int16_t x0     = (OLED_WIDTH  - totalW) / 2 + DOT_RADIUS;
+  int16_t y0     = (OLED_HEIGHT - charH)  / 2 + DOT_RADIUS;
+
+  if (len == 2) {
+    drawDotChar(x0,                    y0, secs / 10);
+    drawDotChar(x0 + charW + CHAR_GAP, y0, secs % 10);
+  } else {
+    drawDotChar(x0, y0, secs);
+  }
 
   oled.display();
 }
