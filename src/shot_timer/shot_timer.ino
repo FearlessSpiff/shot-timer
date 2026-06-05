@@ -35,7 +35,8 @@ Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 
 // ── Timing constants ─────────────────────────────────────────────────
 #define DEBOUNCE_MS         20
-#define HOLD_RESET_MS     2000   // hold duration to trigger reset
+#define HOLD_RESET_MS     1000   // hold duration to trigger reset
+#define HOLD_SLEEP_MS     3000   // hold duration to trigger deep sleep
 #define DISPLAY_INTERVAL_MS 1000 // display update interval while running
 #define MAX_SECONDS         99   // sleep when timer hits this
 #define IDLE_SLEEP_MS    60000UL // sleep if paused/stopped for this long
@@ -125,6 +126,7 @@ void updateDisplay();
 bool     lastSwitchPhysical = HIGH;
 bool     switchPressed      = false;
 bool     switchHeld         = false;
+bool     switchSlept        = false;
 bool     buttonDown         = false;
 uint32_t pressStartMs       = 0;
 
@@ -134,7 +136,11 @@ uint32_t pressStartMs       = 0;
 void goToDeepSleep() {
   oled.ssd1306_command(SSD1306_DISPLAYOFF);
 
+  // Wait for the switch to be released before arming GPIO SENSE —
+  // otherwise the pin is already LOW and the chip wakes immediately.
   pinMode(SWITCH_PIN, INPUT_PULLUP);
+  while (digitalRead(SWITCH_PIN) == LOW) {}
+  delay(200);  // debounce
 
 #ifdef NRF52_SERIES
   attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), [](){}, FALLING);
@@ -275,19 +281,25 @@ void loop() {
   if (raw == HIGH && lastSwitchPhysical == LOW) {
     delay(DEBOUNCE_MS);
     if (digitalRead(SWITCH_PIN) == HIGH) {
-      buttonDown = false;
+      buttonDown  = false;
       if (!switchHeld) {
         switchPressed = true;
       }
-      switchHeld = false;
+      switchHeld  = false;
+      switchSlept = false;
     }
   }
 
-  if (buttonDown && !switchHeld) {
-    if ((millis() - pressStartMs) >= HOLD_RESET_MS) {
+  if (buttonDown) {
+    uint32_t heldMs = millis() - pressStartMs;
+    if (!switchHeld && heldMs >= HOLD_RESET_MS) {
       switchHeld = true;
       timerState = STOPPED;
       resetTimer();
+    }
+    if (switchHeld && !switchSlept && heldMs >= HOLD_SLEEP_MS) {
+      switchSlept = true;
+      goToDeepSleep();
     }
   }
 

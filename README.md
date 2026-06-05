@@ -52,7 +52,8 @@ Most SSD1306 breakout boards label their pins `VCC GND SCL SDA` left-to-right â€
 |---|---|
 | Short press (stopped) | Start timer |
 | Short press (running) | Pause timer |
-| Hold 2 s | Reset timer to 0 |
+| Hold 1 s | Reset timer to 0 |
+| Hold 3 s | Deep sleep |
 | Timer reaches 99 s | Deep sleep |
 | Paused / stopped for 60 s | Deep sleep |
 
