@@ -2,7 +2,9 @@
 
 Switch-controlled coffee shot timer for the Seeed XIAO nRF52840 with SSD1306 OLED display and deep sleep.
 
-## > [!IMPORTANT]
+![Shot timer](pictures/P1001297.jpeg)
+
+## IMPORTANT
 
 * Rotate case by 115.20 degrees in the slicer to have a nice front plate
 * Rotate the backpanel by 79.8 degrees to make it sit flat on the bed
