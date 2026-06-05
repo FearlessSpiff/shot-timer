@@ -159,12 +159,34 @@ void updateDisplay() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// 1-second splash screen
+// ─────────────────────────────────────────────────────────────────────
+void showSplash() {
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setTextSize(2);  // 12 px per char
+
+  // 3 lines × 16 px = 48 px total, centred in 64 px → y starts at 8
+  oled.setCursor((OLED_WIDTH - 10 * 12) / 2, 8);   // "Let's brew"
+  oled.print("Let's brew");
+  oled.setCursor((OLED_WIDTH -  4 * 12) / 2, 24);  // "some"
+  oled.print("some");
+  oled.setCursor((OLED_WIDTH -  7 * 12) / 2, 40);  // "coffee!"
+  oled.print("coffee!");
+
+  oled.display();
+  delay(1000);
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Setup
 // ─────────────────────────────────────────────────────────────────────
 void setup() {
   pinMode(SWITCH_PIN, INPUT_PULLUP);
 
   oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
+
+  showSplash();
 
   idleStartMs = millis();
   updateDisplay();
