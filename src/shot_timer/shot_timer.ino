@@ -30,6 +30,9 @@
 
 Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 
+// ── Config ───────────────────────────────────────────────────────────
+#define SHOW_SPLASH         1    // 1 = show coffee bean splash on boot, 0 = skip
+
 // ── Timing constants ─────────────────────────────────────────────────
 #define DEBOUNCE_MS         20
 #define HOLD_RESET_MS     2000   // hold duration to trigger reset
@@ -245,7 +248,9 @@ void setup() {
 
   oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
 
+#if SHOW_SPLASH
   showSplash();
+#endif
 
   idleStartMs = millis();
   updateDisplay();
