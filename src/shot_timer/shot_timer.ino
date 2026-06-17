@@ -10,7 +10,8 @@
  * Behaviour:
  *   Single press (while stopped) → Start timer
  *   Single press (while running) → Pause timer
- *   Hold 2 s                     → Reset timer to 0
+ *   Hold 1 s                     → Reset timer to 0
+ *   Hold 3 s                     → Show battery percentage
  *   Timer reaches 99 s           → Deep sleep
  *   Timer paused for > 60 s      → Deep sleep
  */
@@ -36,10 +37,18 @@ Adafruit_SSD1306 oled(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET);
 // ── Timing constants ─────────────────────────────────────────────────
 #define DEBOUNCE_MS         20
 #define HOLD_RESET_MS     1000   // hold duration to trigger reset
-#define HOLD_SLEEP_MS     3000   // hold duration to trigger deep sleep
+#define HOLD_BATTERY_MS   3000   // hold duration to show battery percentage
 #define DISPLAY_INTERVAL_MS 1000 // display update interval while running
-#define MAX_SECONDS         99   // sleep when timer hits this
+#define MAX_SECONDS         60   // sleep when timer hits this
 #define IDLE_SLEEP_MS    60000UL // sleep if paused/stopped for this long
+#define BATTERY_DISPLAY_MS 2000  // how long the battery % stays on screen
+
+// ── Battery (XIAO nRF52840 Sense onboard divider — P0.14 / P0.31) ────
+// VBAT_ENABLE and PIN_VBAT are provided by the board variant.
+#define VBAT_DIVIDER_RATIO (1510.0f / 510.0f)  // onboard divider ratio
+#define VBAT_MV_PER_LSB    (0.003395996f)      // 10-bit ADC, ~3.6V internal ref
+#define VBAT_MIN_V         3.0f                // maps to 0%
+#define VBAT_MAX_V         4.2f                // maps to 100%
 
 // ── State machine ─────────────────────────────────────────────────────
 enum TimerState { STOPPED, RUNNING, PAUSED };
@@ -126,7 +135,7 @@ void updateDisplay();
 bool     lastSwitchPhysical = HIGH;
 bool     switchPressed      = false;
 bool     switchHeld         = false;
-bool     switchSlept        = false;
+bool     batteryShown       = false;
 bool     buttonDown         = false;
 uint32_t pressStartMs       = 0;
 
@@ -211,12 +220,11 @@ void drawDotChar(int16_t x0, int16_t y0, uint8_t digit) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Render seconds as dot-matrix digits centered on the OLED
+// Draw a 0-99 number as dot-matrix digits, centered on the OLED.
+// withPercent shifts the digits left and adds a small "%" to the right.
 // ─────────────────────────────────────────────────────────────────────
-void updateDisplay() {
-  oled.clearDisplay();
-
-  uint32_t secs = currentSeconds();
+void drawDotNumber(uint32_t value, bool withPercent) {
+  if (value > 99) value = 99;
 
   const int16_t charW  = 2 * DOT_PITCH + 2 * DOT_RADIUS;  // 32 px
   const int16_t charH  = 4 * DOT_PITCH + 2 * DOT_RADIUS;  // 56 px
@@ -225,14 +233,57 @@ void updateDisplay() {
   int16_t x0 = (OLED_WIDTH  - totalW) / 2 + DOT_RADIUS;
   int16_t y0 = (OLED_HEIGHT - charH)  / 2 + DOT_RADIUS;
 
-  if (secs >= 10) {
-    drawDotChar(x0,                    y0, secs / 10);
-    drawDotChar(x0 + charW + CHAR_GAP, y0, secs % 10);
+  if (withPercent) x0 -= 14;  // make room for the "%" sign on the right
+
+  if (value >= 10) {
+    drawDotChar(x0,                    y0, value / 10);
+    drawDotChar(x0 + charW + CHAR_GAP, y0, value % 10);
   } else {
-    drawDotChar(x0 + charW + CHAR_GAP, y0, secs);  // units slot only
+    drawDotChar(x0 + charW + CHAR_GAP, y0, value);  // units slot only
   }
 
+  if (withPercent) {
+    oled.setTextSize(2);
+    oled.setTextColor(SSD1306_WHITE);
+    oled.setCursor(x0 + 2 * charW + CHAR_GAP + DOT_RADIUS + 4, (OLED_HEIGHT - 16) / 2);
+    oled.print(F("%"));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Render seconds as dot-matrix digits centered on the OLED
+// ─────────────────────────────────────────────────────────────────────
+void updateDisplay() {
+  oled.clearDisplay();
+  drawDotNumber(currentSeconds(), false);
   oled.display();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Battery — read via the XIAO nRF52840 Sense's onboard divider
+// (P0.14 / VBAT_ENABLE gates P0.31 / PIN_VBAT to ~1/3 of battery voltage)
+// ─────────────────────────────────────────────────────────────────────
+float readBatteryVoltage() {
+  digitalWrite(VBAT_ENABLE, LOW);   // enable divider
+  delay(10);                        // let it settle
+  uint32_t raw = analogRead(PIN_VBAT);
+  digitalWrite(VBAT_ENABLE, HIGH);  // disable again to save sleep current
+  return raw * VBAT_MV_PER_LSB * VBAT_DIVIDER_RATIO;
+}
+
+uint8_t batteryPercent() {
+  float pct = (readBatteryVoltage() - VBAT_MIN_V) / (VBAT_MAX_V - VBAT_MIN_V) * 100.0f;
+  if (pct < 0)  pct = 0;
+  if (pct > 99) pct = 99;  // keep it to 2 digits for the dot-matrix display
+  return (uint8_t)(pct + 0.5f);
+}
+
+void showBatteryPercent() {
+  oled.clearDisplay();
+  drawDotNumber(batteryPercent(), true);
+  oled.display();
+  delay(BATTERY_DISPLAY_MS);
+  updateDisplay();  // back to the timer view
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -251,6 +302,9 @@ void showSplash() {
 // ─────────────────────────────────────────────────────────────────────
 void setup() {
   pinMode(SWITCH_PIN, INPUT_PULLUP);
+
+  pinMode(VBAT_ENABLE, OUTPUT);
+  digitalWrite(VBAT_ENABLE, HIGH);  // keep divider disabled until a reading is needed
 
   oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
 
@@ -285,8 +339,8 @@ void loop() {
       if (!switchHeld) {
         switchPressed = true;
       }
-      switchHeld  = false;
-      switchSlept = false;
+      switchHeld    = false;
+      batteryShown  = false;
     }
   }
 
@@ -297,9 +351,9 @@ void loop() {
       timerState = STOPPED;
       resetTimer();
     }
-    if (switchHeld && !switchSlept && heldMs >= HOLD_SLEEP_MS) {
-      switchSlept = true;
-      goToDeepSleep();
+    if (switchHeld && !batteryShown && heldMs >= HOLD_BATTERY_MS) {
+      batteryShown = true;
+      showBatteryPercent();
     }
   }
 

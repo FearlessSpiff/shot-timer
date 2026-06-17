@@ -55,9 +55,11 @@ Most SSD1306 breakout boards label their pins `VCC GND SCL SDA` left-to-right â€
 | Short press (stopped) | Start timer |
 | Short press (running) | Pause timer |
 | Hold 1 s | Reset timer to 0 |
-| Hold 3 s | Deep sleep |
+| Hold 3 s | Show battery percentage (2 s), then back to the timer |
 | Timer reaches 99 s | Deep sleep |
 | Paused / stopped for 60 s | Deep sleep |
+
+Battery percentage is read from the XIAO nRF52840 Sense's onboard divider (`P0.14`/`VBAT_ENABLE` gates `P0.31`/`PIN_VBAT`) â€” no extra wiring needed beyond the `BAT+`/`BAT-` connection already shown above.
 
 Press the switch to wake from deep sleep.
 
